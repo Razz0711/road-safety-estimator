@@ -49,13 +49,17 @@ class NotificationService:
             print(f"📧 DEBUG: PDF Exists: {Path(pdf_path).exists() if pdf_path else 'No PDF'}")
             
             # Create message
-            msg = MIMEMultipart()
+            msg = MIMEMultipart('alternative')
             msg['From'] = self.smtp_from_email
             msg['To'] = to_email
             msg['Subject'] = subject
             
-            # Add body
+            # Add body as both plain text and HTML
             msg.attach(MIMEText(body, 'plain'))
+            
+            # Create HTML version if body contains HTML
+            if '<html>' in body.lower() or '<br>' in body.lower():
+                msg.attach(MIMEText(body, 'html'))
             
             # Attach PDF if provided
             if pdf_path and Path(pdf_path).exists():
@@ -68,17 +72,33 @@ class NotificationService:
             else:
                 print(f"📧 DEBUG: No PDF attachment (path: {pdf_path})")
             
-            # Connect to SMTP server and send
+            # Try connecting to SMTP server with timeout and retry logic
             print(f"📧 DEBUG: Connecting to {self.smtp_server}:{self.smtp_port}")
-            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
-                server.starttls()
-                print(f"📧 DEBUG: Logging in as {self.smtp_username}")
-                server.login(self.smtp_username, clean_password)
-                print(f"📧 DEBUG: Sending message...")
-                server.send_message(msg)
             
-            print(f"📧 DEBUG: ✅ Email sent successfully!")
-            return True, f"Email sent successfully to {to_email}"
+            try:
+                # Try port 587 with STARTTLS first
+                with smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=30) as server:
+                    server.starttls()
+                    print(f"📧 DEBUG: Logging in as {self.smtp_username}")
+                    server.login(self.smtp_username, clean_password)
+                    print(f"📧 DEBUG: Sending message...")
+                    server.send_message(msg)
+                print(f"📧 DEBUG: ✅ Email sent successfully!")
+                return True, f"Email sent successfully to {to_email}"
+                
+            except Exception as port_587_error:
+                print(f"📧 DEBUG: Port 587 failed: {port_587_error}")
+                print(f"📧 DEBUG: Trying alternative port 465 (SSL)...")
+                
+                # Try port 465 with SSL as fallback
+                with smtplib.SMTP_SSL(self.smtp_server, 465, timeout=30) as server:
+                    print(f"📧 DEBUG: Logging in as {self.smtp_username}")
+                    server.login(self.smtp_username, clean_password)
+                    print(f"📧 DEBUG: Sending message...")
+                    server.send_message(msg)
+                
+                print(f"📧 DEBUG: ✅ Email sent successfully via SSL!")
+                return True, f"Email sent successfully to {to_email}"
             
         except smtplib.SMTPAuthenticationError as e:
             print(f"📧 DEBUG: ❌ Authentication failed: {e}")
@@ -88,7 +108,10 @@ class NotificationService:
             return False, f"SMTP error: {str(e)}"
         except Exception as e:
             print(f"📧 DEBUG: ❌ General error: {e}")
-            return False, f"Error sending email: {str(e)}"
+            error_msg = str(e)
+            if "10060" in error_msg or "timed out" in error_msg.lower():
+                return False, "Connection timeout. Please check: 1) Your firewall/antivirus settings, 2) Network connection, 3) Try disabling VPN if active"
+            return False, f"Error sending email: {error_msg}"
     
     def is_email_configured(self):
         """Check if email service is properly configured"""
