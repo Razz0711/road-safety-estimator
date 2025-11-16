@@ -7,7 +7,13 @@ from document_parser import DocumentParser
 from matching_engine import MatchingEngine
 from price_fetcher import PriceFetcher
 from report_generator import ReportGenerator
+from notification_service import get_notification_service
 import time
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Page configuration
 st.set_page_config(
@@ -326,26 +332,12 @@ def upload_section():
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        st.markdown("""
-            <div style='
-                background: #f8fafc;
-                padding: 2rem;
-                border-radius: 15px;
-                border: 2px dashed #cbd5e1;
-                text-align: center;
-                margin-bottom: 1rem;
-                transition: all 0.3s ease;
-            '>
-        """, unsafe_allow_html=True)
-        
         uploaded_file = st.file_uploader(
             "Drag and drop your file here",
             type=['pdf', 'docx', 'txt'],
             help="Upload your road safety audit report in PDF, DOCX, or TXT format",
-            label_visibility="collapsed"
+            label_visibility="visible"
         )
-        
-        st.markdown("</div>", unsafe_allow_html=True)
         
         if uploaded_file is not None:
             st.markdown(f"""
@@ -808,6 +800,9 @@ def report_section():
                 
                 st.session_state.report_path = report_path
                 st.session_state.report_completed = True
+                st.session_state.project_name = project_name
+                st.session_state.report_date = report_date
+                st.session_state.consultant_name = consultant_name
                 
                 progress_bar.progress(100)
                 status_text.empty()
@@ -816,20 +811,154 @@ def report_section():
                 st.balloons()
                 st.success("✅ Report generated successfully!")
                 
-                # Download button
-                with open(report_path, 'rb') as f:
-                    st.download_button(
-                        label="📥 Download Report (PDF)",
-                        data=f,
-                        file_name=f"road_safety_report_{report_date}.pdf",
-                        mime="application/pdf",
-                        use_container_width=True
-                    )
-                
             except Exception as e:
                 progress_bar.empty()
                 status_text.empty()
                 st.error(f"❌ Error generating report: {str(e)}")
+        
+        # Show download and email options if report was generated
+        if st.session_state.get('report_completed') and st.session_state.get('report_path'):
+            report_path = st.session_state.report_path
+            project_name = st.session_state.get('project_name', 'Road Safety Project')
+            report_date = st.session_state.get('report_date', 'Unknown')
+            consultant_name = st.session_state.get('consultant_name', 'Unknown')
+            priced_data = st.session_state.get('priced_data', [])
+            
+            # Download button
+            st.markdown("<br>", unsafe_allow_html=True)
+            with open(report_path, 'rb') as f:
+                st.download_button(
+                    label="📥 Download Report (PDF)",
+                    data=f,
+                    file_name=f"road_safety_report_{report_date}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                    key="download_report_btn"
+                )
+            
+            # Email Sharing Section - Professional Design
+            st.markdown("<br><br>", unsafe_allow_html=True)
+            
+            # Get notification service
+            notification_service = get_notification_service()
+            config = notification_service.get_configuration_instructions()
+            
+            # Container with professional styling
+            with st.container():
+                st.markdown("""
+                    <div style='
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        padding: 2rem;
+                        border-radius: 12px;
+                        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                        margin-bottom: 1.5rem;
+                    '>
+                        <h3 style='color: white; margin: 0; text-align: center; font-weight: 600;'>
+                            📧 Share Report via Email
+                        </h3>
+                        <p style='color: rgba(255, 255, 255, 0.9); text-align: center; margin-top: 0.5rem; margin-bottom: 0;'>
+                            Send the PDF report directly to your recipient's inbox
+                        </p>
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                # Configuration Status - Compact design
+                if config['email']['configured']:
+                    st.success("✅ Email service ready", icon="✅")
+                else:
+                    col_warn, col_info = st.columns([3, 1])
+                    with col_warn:
+                        st.warning("⚠️ Email not configured - Setup required", icon="⚠️")
+                    with col_info:
+                        if st.button("ℹ️ Setup Guide", key="email_setup_btn", use_container_width=True):
+                            st.session_state.show_email_setup = not st.session_state.get('show_email_setup', False)
+                            st.rerun()
+                    
+                    if st.session_state.get('show_email_setup', False):
+                        with st.expander("📋 Email Setup Instructions (FREE with Gmail)", expanded=True):
+                            st.markdown(config['email']['instructions'])
+                            if st.button("✖️ Close", key="close_setup_btn"):
+                                st.session_state.show_email_setup = False
+                                st.rerun()
+                
+                # Email Form - Clean design
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    email_address = st.text_input(
+                        "Recipient Email",
+                        placeholder="Enter recipient's email address",
+                        label_visibility="collapsed",
+                        key="recipient_email"
+                    )
+                with col2:
+                    send_button = st.button(
+                        "📤 Send", 
+                        use_container_width=True, 
+                        type="primary",
+                        disabled=not email_address
+                    )
+                
+                if send_button:
+                    if email_address:
+                        # Email subject and body
+                        subject = f"Road Safety Cost Estimate Report - {project_name}"
+                        body = f"""Dear Recipient,
+
+Please find attached the Road Safety Cost Estimate Report for your review.
+
+Project Information:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Project Name: {project_name}
+• Report Date: {report_date}
+• Consultant: {consultant_name}
+• Total Items: {len(priced_data)}
+• Estimated Cost: ₹{sum(item.get('total_with_gst', 0) for item in priced_data)/100000:.2f} Lakhs
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The attached PDF contains a comprehensive breakdown of all road safety items, quantities, rates, and cost estimates.
+
+If you have any questions or require clarification, please feel free to reach out.
+
+Best regards,
+Road Safety Estimator Team
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+This report was automatically generated by Road Safety Estimator
+"""
+                        
+                        with st.spinner("📨 Sending email..."):
+                            success, msg = notification_service.send_email(
+                                email_address,
+                                subject,
+                                body,
+                                report_path
+                            )
+                            
+                            if success:
+                                st.success(f"✅ Email sent successfully to **{email_address}**", icon="✅")
+                                st.balloons()
+                            else:
+                                st.error(f"❌ Failed to send email: {msg}", icon="❌")
+                                if not config['email']['configured']:
+                                    st.info("💡 **Setup Required:** Configure Gmail SMTP in `.env` file. Click 'Setup Guide' above for instructions.", icon="💡")
+                    else:
+                        st.warning("⚠️ Please enter a valid email address", icon="⚠️")
+                
+                # Footer info - subtle
+                st.markdown("""
+                    <div style='
+                        text-align: center; 
+                        padding: 1rem; 
+                        color: #666; 
+                        font-size: 0.85rem;
+                        margin-top: 1rem;
+                        border-top: 1px solid #e0e0e0;
+                    '>
+                        🔒 Secure • 🆓 Free Gmail SMTP • 📎 PDF Attachment Included
+                    </div>
+                """, unsafe_allow_html=True)
     
     # Preview section
     if 'priced_data' in st.session_state:
